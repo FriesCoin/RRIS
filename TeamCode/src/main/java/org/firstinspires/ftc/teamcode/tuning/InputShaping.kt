@@ -2,21 +2,25 @@ package org.firstinspires.ftc.teamcode.tuning
 
 import android.os.Environment
 import com.acmerobotics.roadrunner.ftc.DriveViewFactory
+import com.acmerobotics.roadrunner.ftc.EncoderGroup
+import com.acmerobotics.roadrunner.ftc.EncoderRef
 import com.acmerobotics.roadrunner.ftc.MidpointTimer
 import com.acmerobotics.roadrunner.ftc.TuningFiles
+import com.acmerobotics.roadrunner.ftc.TuningFiles.FileType
 import com.acmerobotics.roadrunner.ftc.shouldFixVels
 import com.fasterxml.jackson.core.JsonFactory
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode
+import com.qualcomm.robotcore.util.RobotLog
 import java.io.File
 import java.io.FileWriter
+import java.io.IOException
 import kotlin.math.min
 class MutableSignal(
     val times: MutableList<Double> = mutableListOf(),
     val values: MutableList<Double> = mutableListOf()
 )
 class InputShaping(val dvf: DriveViewFactory) : LinearOpMode() {
-
     companion object {
         @JvmField
         var POWER_PER_SEC = 0.1
@@ -27,7 +31,6 @@ class InputShaping(val dvf: DriveViewFactory) : LinearOpMode() {
         POWER_PER_SEC * seconds,
         POWER_MAX
     )
-
 
     override fun runOpMode() {
         val view = dvf.make(hardwareMap)
@@ -64,16 +67,35 @@ class InputShaping(val dvf: DriveViewFactory) : LinearOpMode() {
                 it.bulkRead()
                 t.addSplit()
             }
+
+            for (i in view.forwardEncs.indices) {
+                recordUnwrappedEncoderData(
+                    view.encoderGroups,
+                    encTimes,
+                    view.forwardEncs[i],
+                    data.forwardEncPositions[i],
+                    data.forwardEncVels[i]
+                )
+            }
         }
 
         for (m in view.motors) {
             m.power = 0.0
         }
-        val s = File(Environment.getRootDirectory().path+"/inputShape/"+"input_shaping.json");
-        s.createNewFile();
-        ObjectMapper(JsonFactory())
-            .writerWithDefaultPrettyPrinter()
-            .writeValue(s, data)
-        TuningFiles.save(TuningFiles.FileType.INPUT_SHAPING, data)
+
+        TuningFiles.save(FileType.ACCEL, data)
+    }
+}
+private fun recordUnwrappedEncoderData(gs: List<EncoderGroup>, ts: List<Double>, er: EncoderRef, ps: MutableSignal, vs: MutableSignal) {
+    val t = ts[er.groupIndex]
+    val e = gs[er.groupIndex].unwrappedEncoders[er.index]
+    val pv = e.getPositionAndVelocity()
+
+    ps.times.add(t)
+    ps.values.add(pv.position.toDouble())
+
+    if (pv.velocity != null) {
+        vs.times.add(t)
+        vs.values.add(pv.velocity!!.toDouble())
     }
 }
