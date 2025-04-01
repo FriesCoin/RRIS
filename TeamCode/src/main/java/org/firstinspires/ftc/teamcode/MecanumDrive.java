@@ -71,6 +71,8 @@ public final class MecanumDrive {
         public double kS = 1.123908963569805;
         public double kV = 0.00025507754103719306;
         public double kA = 0.000039;
+        public double[] hE = {};
+        public double[] hS = {};
 
         // path profile parameters (in inches)
         public double maxWheelVel = 50;
@@ -89,6 +91,11 @@ public final class MecanumDrive {
         public double axialVelGain = 0.0;
         public double lateralVelGain = 0.0;
         public double headingVelGain = 0.0; // shared with turn
+        // path controller gains
+        public double hP = 0.0;
+        public double hI = 0.0;
+        public double hD = 0.0; // shared with turn
+        public double maxSpeed = 0.0;
     }
 
     public static Params PARAMS = new Params();
@@ -119,7 +126,9 @@ public final class MecanumDrive {
     private final DownsampledWriter targetPoseWriter = new DownsampledWriter("TARGET_POSE", 50_000_000);
     private final DownsampledWriter driveCommandWriter = new DownsampledWriter("DRIVE_COMMAND", 50_000_000);
     private final DownsampledWriter mecanumCommandWriter = new DownsampledWriter("MECANUM_COMMAND", 50_000_000);
-
+    public static float lerp(float a, float b, float t) {
+        return a + t * (b - a);
+    }
     public class DriveLocalizer implements Localizer {
         public final Encoder leftFront, leftBack, rightBack, rightFront;
         public final IMU imu;
@@ -266,6 +275,13 @@ public final class MecanumDrive {
         rightBack.setPower(wheelVels.rightBack.get(0) / maxPowerMag);
         rightFront.setPower(wheelVels.rightFront.get(0) / maxPowerMag);
     }
+    public double reverseLerp(double a, double b, double v) {
+        if (a == b) {
+            throw new IllegalArgumentException("a and b cannot be the same value");
+        }
+        return (v - a) / (b - a);
+    }
+
 
     public final class FollowTrajectoryAction implements Action {
         public final TimeTrajectory timeTrajectory;
@@ -311,10 +327,12 @@ public final class MecanumDrive {
             targetPoseWriter.write(new PoseMessage(txWorldTarget.value()));
 
             PoseVelocity2d robotVelRobot = updatePoseEstimate();
-
             PoseVelocity2dDual<Time> command = new HolonomicController(
                     PARAMS.axialGain, PARAMS.lateralGain, PARAMS.headingGain,
-                    PARAMS.axialVelGain, PARAMS.lateralVelGain, PARAMS.headingVelGain
+                    PARAMS.axialVelGain, PARAMS.lateralVelGain, PARAMS.headingVelGain,
+                    PARAMS.hS, PARAMS.hE,
+                    PARAMS.hP, PARAMS.hI,PARAMS.hD,
+                    reverseLerp(0, PARAMS.maxSpeed, PARAMS.maxWheelVel)
             )
                     .compute(txWorldTarget, localizer.getPose(), robotVelRobot);
             driveCommandWriter.write(new DriveCommandMessage(command));
@@ -406,7 +424,10 @@ public final class MecanumDrive {
 
             PoseVelocity2dDual<Time> command = new HolonomicController(
                     PARAMS.axialGain, PARAMS.lateralGain, PARAMS.headingGain,
-                    PARAMS.axialVelGain, PARAMS.lateralVelGain, PARAMS.headingVelGain
+                    PARAMS.axialVelGain, PARAMS.lateralVelGain, PARAMS.headingVelGain,
+                    PARAMS.hS, PARAMS.hE,
+                    PARAMS.hP, PARAMS.hI,PARAMS.hD,
+                    reverseLerp(0, PARAMS.maxSpeed, PARAMS.maxWheelVel)
             )
                     .compute(txWorldTarget, localizer.getPose(), robotVelRobot);
             driveCommandWriter.write(new DriveCommandMessage(command));
