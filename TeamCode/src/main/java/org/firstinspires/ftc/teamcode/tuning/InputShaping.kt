@@ -1,6 +1,5 @@
 package org.firstinspires.ftc.teamcode.tuning
 
-import android.os.Environment
 import com.acmerobotics.roadrunner.ftc.DriveViewFactory
 import com.acmerobotics.roadrunner.ftc.EncoderGroup
 import com.acmerobotics.roadrunner.ftc.EncoderRef
@@ -8,14 +7,12 @@ import com.acmerobotics.roadrunner.ftc.MidpointTimer
 import com.acmerobotics.roadrunner.ftc.TuningFiles
 import com.acmerobotics.roadrunner.ftc.TuningFiles.FileType
 import com.acmerobotics.roadrunner.ftc.shouldFixVels
-import com.fasterxml.jackson.core.JsonFactory
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot.xyzOrientation
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode
-import com.qualcomm.robotcore.util.RobotLog
-import java.io.File
-import java.io.FileWriter
-import java.io.IOException
+import com.qualcomm.robotcore.hardware.IMU
 import kotlin.math.min
+
 class MutableSignal(
     val times: MutableList<Double> = mutableListOf(),
     val values: MutableList<Double> = mutableListOf()
@@ -27,13 +24,24 @@ class InputShaping(val dvf: DriveViewFactory) : LinearOpMode() {
         @JvmField
         var POWER_MAX = 0.9
     }
-    fun power(seconds: Double) = min(
+    private fun power(seconds: Double) = min(
         POWER_PER_SEC * seconds,
         POWER_MAX
     )
 
     override fun runOpMode() {
         val view = dvf.make(hardwareMap)
+        val imu = view.imu.get();
+
+        val xRotation = 0.0 // enter the desired X rotation angle here.
+        val yRotation = 0.0 // enter the desired Y rotation angle here.
+        val zRotation = 0.0 // enter the desired Z rotation angle here.
+        val hubRotation = xyzOrientation(xRotation, yRotation, zRotation);
+
+        // Now initialize the IMU with this mounting orientation
+        val orientationOnRobot : RevHubOrientationOnRobot = RevHubOrientationOnRobot(hubRotation);
+        imu.initialize(IMU.Parameters(orientationOnRobot))
+        imu.resetYaw()
         require(view.perpEncs.isNotEmpty()) {
             "Only run this op mode if you're using dead wheels."
         }
@@ -45,37 +53,58 @@ class InputShaping(val dvf: DriveViewFactory) : LinearOpMode() {
             val forwardEncPositions = view.forwardEncs.map { MutableSignal() }
             val forwardEncVels = view.forwardEncs.map { MutableSignal() }
             val forwardEncFixVels = view.forwardEncs.map { shouldFixVels(view, it) }
+            val heading = MutableSignal()
+        }
+        val data2 = object {
+            val d = listOf(data);
         }
 
         waitForStart()
 
         val t = MidpointTimer()
+        val lastTime = 0;
+        var period = 0;
+        var stop = false;
         while (opModeIsActive()) {
-            for (i in view.motors.indices) {
-                val power = power(t.seconds())
-                view.motors[i].power = power
+            // Retrieve Rotational Angles and Velocities
+            val orientation = imu.robotYawPitchRollAngles
+            if(!stop){
+                for (i in view.motors.indices) {
+                    val power = (period+1)*0.2;
+                    view.motors[i].power = power
 
-                val s = data.powers[i]
-                s.times.add(t.addSplit())
-                s.values.add(power)
+                    val s = data.powers[i]
+                    s.times.add(t.addSplit())
+                    s.values.add(power)
+                }
+                data2.d[period].voltages.values.add(view.voltageSensor.voltage)
+                data2.d[period].voltages.times.add(t.addSplit())
+                data2.d[period].heading.values.add(orientation.yaw)
+                data2.d[period].heading.times.add(t.addSplit())
+
+                val encTimes = view.encoderGroups.map {
+                    it.bulkRead()
+                    t.addSplit()
+                }
+
+                for (i in view.forwardEncs.indices) {
+                    recordUnwrappedEncoderData(
+                        view.encoderGroups,
+                        encTimes,
+                        view.forwardEncs[i],
+                        data2.d[period].forwardEncPositions[i],
+                        data2.d[period].forwardEncVels[i]
+                    )
+                }
             }
-
-            data.voltages.values.add(view.voltageSensor.voltage)
-            data.voltages.times.add(t.addSplit())
-
-            val encTimes = view.encoderGroups.map {
-                it.bulkRead()
-                t.addSplit()
+            if(gamepad1.x){
+                stop = true;
             }
-
-            for (i in view.forwardEncs.indices) {
-                recordUnwrappedEncoderData(
-                    view.encoderGroups,
-                    encTimes,
-                    view.forwardEncs[i],
-                    data.forwardEncPositions[i],
-                    data.forwardEncVels[i]
-                )
+            if (gamepad1.y) {
+                stop = false;
+                period += 1;
+                telemetry.addData("Yaw", "Resetting\n")
+                imu.resetYaw()
             }
         }
 
